@@ -1,0 +1,103 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{setspace}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{enumitem}
+
+\begin{document}
+
+\begin{center}
+    {\LARGE \textbf{Project Proposal}}\\[1.0cm]
+\end{center}
+
+%================= Project Title =================
+\section*{Project Title}
+\textbf{SNR-Adaptive Automatic Modulation Classification using Mixture of Experts}
+
+%================= Proposed Cluster =============
+\section*{Proposed Cluster}
+\begin{itemize}[noitemsep]
+    \item AIML
+    \item ACOM
+\end{itemize}
+
+%================= Team Members =================
+\section*{Team Members}
+\begin{itemize}[noitemsep]
+    \item Bhaskar Bhatt (079BEI013)
+    \item Dharma Raj Thapa (079BEI017)
+    \item Saurab Poudel (079BEI036)
+    \item Sujan Bimali (079BEI044)
+\end{itemize}
+
+%================= Project Overview =============
+\section*{Project Overview}
+\onehalfspacing
+Automatic Modulation Classification (AMC) is a key enabling technology for cognitive radio, spectrum monitoring, and intelligent wireless receivers that must identify unknown signals in real time. Conventional deep learning-based AMC systems typically rely on a single model trained over a wide range of signal-to-noise ratios (SNRs) and channel conditions, which often leads to suboptimal performance because low-SNR and high-SNR regimes demand different feature extraction behaviours. Recent literature on deep AMC shows strong performance at specific SNR ranges but still treats the classifier as a one-size-fits-all network.[web:36][web:89]
+
+This project proposes an SNR-adaptive AMC framework based on a Mixture of Experts (MoE) architecture operating directly on complex baseband I/Q samples. The system includes an SNR estimator, a routing or gating network, and multiple specialized expert classifiers, each trained for a particular SNR regime (e.g., low, mid, and high SNR). At inference time, the estimated SNR is used to activate the most relevant experts, and their outputs are fused through soft gating or voting to produce the final modulation decision. The approach will be evaluated on simulated or public RadioML-style datasets containing common digital modulations under AWGN and fading channels, with performance reported as accuracy versus SNR and channel type. By explicitly adapting to SNR, the proposed MoE-based AMC is expected to provide better robustness and efficiency than a single global model, making it attractive for deployment in practical 5G/6G and software-defined radio systems.[web:36][web:62]
+
+%================= Motivation ===================
+\section*{Motivation}
+Most existing deep learning-based AMC systems use a single classifier for all SNR conditions, even though the characteristics of received signals change dramatically between very noisy and high-quality channels. This mismatch can lead to wasted model capacity at high SNR and poor discrimination at low SNR. As undergraduate students interested in advanced communication and machine learning, designing an SNR-adaptive Mixture of Experts architecture allows us to combine theoretical knowledge of SNR, modulation, and channel models with modern deep learning ideas such as expert specialization and gating networks. The goal is to build a system that is not only academically interesting but also novel enough to form the basis of a research publication in AMC and intelligent wireless receivers.[web:36][web:62]
+
+%================= Implementation Plan ==========
+\section*{Implementation Plan}
+The implementation will proceed in several stages:
+
+\begin{enumerate}[noitemsep]
+    \item \textbf{Literature Review and Problem Definition}: Survey recent work on deep learning-based AMC, SNR-aware models, and mixture-of-experts architectures to refine the exact SNR ranges, modulations, and channel models to be considered.[web:36][web:62]
+    \item \textbf{Dataset Generation and Preprocessing}: Use or generate complex baseband I/Q datasets (e.g., RadioML-style) with common digital modulations over AWGN and fading channels, covering a defined SNR range (e.g., $-10$ dB to $20$ dB). Prepare train/validation/test splits stratified by SNR.
+    \item \textbf{SNR Estimator Design}: Implement a lightweight SNR estimation module that takes I/Q samples as input and outputs an SNR estimate or SNR-bin probability vector suitable for gating.
+    \item \textbf{Expert Networks Training}: Design and train separate expert CNN-based AMC models specialized for different SNR ranges (e.g., low, mid, high SNR), using appropriate subsets of the training data.
+    \item \textbf{Gating and Fusion Mechanism}: Implement a routing/gating network that, given the estimated SNR, selects or weights the outputs of the experts. Explore both hard routing (select one expert) and soft gating (weighted combination).
+    \item \textbf{Evaluation and Analysis}: Compare the proposed SNR-adaptive MoE AMC against a single global CNN baseline in terms of classification accuracy versus SNR, robustness across channels, and model complexity (parameters, inference cost).
+    \item \textbf{Documentation and Reporting}: Prepare code, plots, and a structured report suitable for internal evaluation and potential research paper submission.
+\end{enumerate}
+
+A simplified diagrammatic representation of the system is:
+\[
+\scriptsize
+\begin{aligned}
+&\text{Input I/Q Signal} \rightarrow
+\boxed{\text{SNR Estimator}} \rightarrow
+\boxed{\text{Router / Gating Network}} \Rightarrow
+\{\text{Expert}_{\text{Low SNR}},\ \text{Expert}_{\text{Mid SNR}},\\
+&\text{Expert}_{\text{High SNR}}\}
+\rightarrow \text{Weighted Combination}
+\rightarrow \text{Final Modulation Prediction}
+\end{aligned}
+\]
+
+
+%================= Use Cases ====================
+\section*{Use Cases}
+\begin{itemize}[noitemsep]
+    \item Cognitive radio systems that need reliable blind modulation recognition under rapidly changing SNR and channel conditions.
+    \item Spectrum monitoring and regulatory applications where robust classification is required across a wide range of signal qualities and interference scenarios.
+    \item Software-defined radio (SDR) testbeds for 5G/6G physical-layer research, where adaptive AMC can improve link adaptation and resource allocation.
+    \item Defence, surveillance, and electronic warfare systems requiring flexible signal intelligence and automatic identification of unknown emitters.
+\end{itemize}
+
+%================= Resources Required ===========
+\section*{Resources Required}
+\begin{itemize}[noitemsep]
+    \item \textbf{Computing Resources}:
+    \begin{itemize}[noitemsep]
+        \item Workstation or laptop with multi-core CPU and at least 16~GB RAM.
+        \item Access to a GPU (e.g., NVIDIA GTX/RTX series) for training multiple expert networks efficiently.
+        \item Python environment with libraries such as NumPy, SciPy, PyTorch or TensorFlow, Matplotlib, and scikit-learn.
+    \end{itemize}
+    \item \textbf{Software and Datasets}:
+    \begin{itemize}[noitemsep]
+        \item Public RadioML-style I/Q datasets or locally generated simulated datasets covering a range of modulations, SNRs, and channels.
+        \item Version control using Git and a code hosting platform (e.g., GitHub or GitLab) for collaborative development.
+    \end{itemize}
+    \item \textbf{Hardware (Optional)}:
+    \begin{itemize}[noitemsep]
+        \item Software-defined radio (SDR) hardware (e.g., USRP, RTL-SDR) for capturing real over-the-air signals to test the SNR-adaptive AMC in practical environments.
+    \end{itemize}
+\end{itemize}
+
+\end{document}

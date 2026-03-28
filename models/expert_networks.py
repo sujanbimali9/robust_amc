@@ -2,48 +2,115 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
+class SEBlock(nn.Module):
+    """Squeeze-and-Excitation block for channel attention"""
+    def __init__(self, channels, reduction=4):
+        super(SEBlock, self).__init__()
+        self.squeeze = nn.AdaptiveAvgPool1d(1)
+        self.excitation = nn.Sequential(
+            nn.Linear(channels, max(channels // reduction, 8), bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(max(channels // reduction, 8), channels, bias=False),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        b, c, _ = x.size()
+        y = self.squeeze(x).view(b, c)
+        y = self.excitation(y).view(b, c, 1)
+        return x * y
+
+
+class ResidualBlock(nn.Module):
+    """Residual block with optional channel projection and SE attention"""
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, 
+                 use_se=True, dropout=0.0):
+        super(ResidualBlock, self).__init__()
+        padding = kernel_size // 2
+        self.conv1 = nn.Conv1d(in_channels, out_channels, kernel_size=kernel_size, 
+                               padding=padding, stride=stride, bias=False)
+        self.bn1 = nn.BatchNorm1d(out_channels)
+        self.conv2 = nn.Conv1d(out_channels, out_channels, kernel_size=kernel_size, 
+                               padding=padding, bias=False)
+        self.bn2 = nn.BatchNorm1d(out_channels)
+        
+        self.se = SEBlock(out_channels) if use_se else nn.Identity()
+        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+        
+        # Shortcut projection if dimensions change
+        self.shortcut = nn.Identity()
+        if stride != 1 or in_channels != out_channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv1d(in_channels, out_channels, kernel_size=1, 
+                         stride=stride, bias=False),
+                nn.BatchNorm1d(out_channels)
+            )
+
+    def forward(self, x):
+        residual = self.shortcut(x)
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.dropout(out)
+        out = self.bn2(self.conv2(out))
+        out = self.se(out)
+        out += residual
+        out = F.relu(out)
+        return out
+
+
 class ExpertCNN(nn.Module):
     def __init__(self, input_channels=2, num_classes=8, filters=[64, 128, 256]):
         """
-        Expert CNN classifier for specific SNR range
+        Expert CNN classifier with residual blocks and SE attention.
+        Optimized for 128-length I/Q signals.
         
         Args:
             input_channels: Number of input channels (2 for I/Q)
             num_classes: Number of modulation classes
-            filters: List of filter sizes for conv layers
+            filters: List of filter sizes for conv stages
         """
         super(ExpertCNN, self).__init__()
+
+        # Stem: initial feature extraction with multi-scale kernels
+        self.stem_3 = nn.Conv1d(input_channels, filters[0] // 2, kernel_size=3, padding=1, bias=False)
+        self.stem_7 = nn.Conv1d(input_channels, filters[0] // 2, kernel_size=7, padding=3, bias=False)
+        self.stem_bn = nn.BatchNorm1d(filters[0])
         
-        # First conv block
-        self.conv1 = nn.Conv1d(input_channels, filters[0], kernel_size=7, padding=3)
-        self.bn1 = nn.BatchNorm1d(filters[0])
-        self.pool1 = nn.MaxPool1d(2)
-        
-        # Second conv block
-        self.conv2 = nn.Conv1d(filters[0], filters[1], kernel_size=5, padding=2)
-        self.bn2 = nn.BatchNorm1d(filters[1])
-        self.pool2 = nn.MaxPool1d(2)
-        
-        # Third conv block
-        self.conv3 = nn.Conv1d(filters[1], filters[2], kernel_size=3, padding=1)
-        self.bn3 = nn.BatchNorm1d(filters[2])
-        self.pool3 = nn.MaxPool1d(2)
-        
-        # Fourth conv block
-        self.conv4 = nn.Conv1d(filters[2], filters[2], kernel_size=3, padding=1)
-        self.bn4 = nn.BatchNorm1d(filters[2])
-        self.pool4 = nn.MaxPool1d(2)
-        
-        # Global average pooling
+        # Stage 1: filters[0] channels, no downsampling
+        self.stage1 = nn.Sequential(
+            ResidualBlock(filters[0], filters[0], kernel_size=7, dropout=0.1),
+            ResidualBlock(filters[0], filters[0], kernel_size=5, dropout=0.1),
+        )
+
+        # Stage 2: filters[0] -> filters[1], downsample x2
+        self.stage2 = nn.Sequential(
+            ResidualBlock(filters[0], filters[1], kernel_size=5, stride=2, dropout=0.1),
+            ResidualBlock(filters[1], filters[1], kernel_size=3, dropout=0.1),
+        )
+
+        # Stage 3: filters[1] -> filters[2], downsample x2
+        self.stage3 = nn.Sequential(
+            ResidualBlock(filters[1], filters[2], kernel_size=3, stride=2, dropout=0.15),
+            ResidualBlock(filters[2], filters[2], kernel_size=3, dropout=0.15),
+        )
+
+        # Global average + max pooling (concatenated for richer features)
         self.gap = nn.AdaptiveAvgPool1d(1)
-        
-        # Fully connected layers
-        self.fc1 = nn.Linear(filters[2], 256)
-        self.dropout1 = nn.Dropout(0.5)
-        self.fc2 = nn.Linear(256, 128)
-        self.dropout2 = nn.Dropout(0.5)
-        self.fc3 = nn.Linear(128, num_classes)
-        
+        self.gmp = nn.AdaptiveMaxPool1d(1)
+
+        # Classifier head with more capacity
+        self.classifier = nn.Sequential(
+            nn.Linear(filters[2] * 2, 256),  # *2 because avg+max pooling
+            nn.BatchNorm1d(256),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.4),
+            nn.Linear(256, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.3),
+            nn.Linear(128, num_classes),
+        )
+
     def forward(self, x):
         """
         Args:
@@ -51,96 +118,84 @@ class ExpertCNN(nn.Module):
         Returns:
             Class logits (batch_size, num_classes)
         """
-        # Conv blocks
-        x = F.relu(self.bn1(self.conv1(x)))
-        x = self.pool1(x)
+        # Multi-scale stem
+        x3 = self.stem_3(x)
+        x7 = self.stem_7(x)
+        x = torch.cat([x3, x7], dim=1)
+        x = F.relu(self.stem_bn(x))
         
-        x = F.relu(self.bn2(self.conv2(x)))
-        x = self.pool2(x)
+        x = self.stage1(x)
+        x = self.stage2(x)
+        x = self.stage3(x)
         
-        x = F.relu(self.bn3(self.conv3(x)))
-        x = self.pool3(x)
+        # Combined pooling
+        x_avg = self.gap(x).view(x.size(0), -1)
+        x_max = self.gmp(x).view(x.size(0), -1)
+        x = torch.cat([x_avg, x_max], dim=1)
         
-        x = F.relu(self.bn4(self.conv4(x)))
-        x = self.pool4(x)
-        
-        # Global pooling
-        x = self.gap(x)
-        x = x.view(x.size(0), -1)
-        
-        # FC layers
-        x = F.relu(self.fc1(x))
-        x = self.dropout1(x)
-        x = F.relu(self.fc2(x))
-        x = self.dropout2(x)
-        x = self.fc3(x)
-        
+        x = self.classifier(x)
         return x
 
-
-class ResidualBlock(nn.Module):
-    def __init__(self, channels):
-        super(ResidualBlock, self).__init__()
-        self.conv1 = nn.Conv1d(channels, channels, kernel_size=3, padding=1)
-        self.bn1 = nn.BatchNorm1d(channels)
-        self.conv2 = nn.Conv1d(channels, channels, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm1d(channels)
+    def get_features(self, x):
+        """Extract intermediate features (for gating network)"""
+        x3 = self.stem_3(x)
+        x7 = self.stem_7(x)
+        x = torch.cat([x3, x7], dim=1)
+        x = F.relu(self.stem_bn(x))
         
-    def forward(self, x):
-        residual = x
-        out = F.relu(self.bn1(self.conv1(x)))
-        out = self.bn2(self.conv2(out))
-        out += residual
-        out = F.relu(out)
-        return out
+        x = self.stage1(x)
+        x = self.stage2(x)
+        x = self.stage3(x)
+        
+        x_avg = self.gap(x).view(x.size(0), -1)
+        x_max = self.gmp(x).view(x.size(0), -1)
+        return torch.cat([x_avg, x_max], dim=1)
 
 
 class ResNetExpert(nn.Module):
     def __init__(self, input_channels=2, num_classes=8, base_filters=64):
         """
-        ResNet-based expert classifier
+        Deeper ResNet-based expert classifier
         """
         super(ResNetExpert, self).__init__()
-        
-        self.conv1 = nn.Conv1d(input_channels, base_filters, kernel_size=7, padding=3)
-        self.bn1 = nn.BatchNorm1d(base_filters)
-        self.pool1 = nn.MaxPool1d(2)
-        
-        self.res1 = ResidualBlock(base_filters)
-        self.res2 = ResidualBlock(base_filters)
-        
-        self.conv2 = nn.Conv1d(base_filters, base_filters * 2, kernel_size=3, padding=1, stride=2)
-        self.bn2 = nn.BatchNorm1d(base_filters * 2)
-        
-        self.res3 = ResidualBlock(base_filters * 2)
-        self.res4 = ResidualBlock(base_filters * 2)
-        
-        self.conv3 = nn.Conv1d(base_filters * 2, base_filters * 4, kernel_size=3, padding=1, stride=2)
-        self.bn3 = nn.BatchNorm1d(base_filters * 4)
-        
-        self.res5 = ResidualBlock(base_filters * 4)
-        self.res6 = ResidualBlock(base_filters * 4)
-        
+
+        self.stem = nn.Sequential(
+            nn.Conv1d(input_channels, base_filters, kernel_size=7, padding=3, bias=False),
+            nn.BatchNorm1d(base_filters),
+            nn.ReLU(inplace=True),
+        )
+
+        self.layer1 = nn.Sequential(
+            ResidualBlock(base_filters, base_filters),
+            ResidualBlock(base_filters, base_filters),
+        )
+
+        self.layer2 = nn.Sequential(
+            ResidualBlock(base_filters, base_filters * 2, stride=2),
+            ResidualBlock(base_filters * 2, base_filters * 2),
+        )
+
+        self.layer3 = nn.Sequential(
+            ResidualBlock(base_filters * 2, base_filters * 4, stride=2),
+            ResidualBlock(base_filters * 4, base_filters * 4),
+        )
+
         self.gap = nn.AdaptiveAvgPool1d(1)
-        self.fc = nn.Linear(base_filters * 4, num_classes)
-        
+        self.gmp = nn.AdaptiveMaxPool1d(1)
+        self.fc = nn.Sequential(
+            nn.Linear(base_filters * 8, 256),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.3),
+            nn.Linear(256, num_classes),
+        )
+
     def forward(self, x):
-        x = F.relu(self.bn1(self.conv1(x)))
-        x = self.pool1(x)
-        
-        x = self.res1(x)
-        x = self.res2(x)
-        
-        x = F.relu(self.bn2(self.conv2(x)))
-        x = self.res3(x)
-        x = self.res4(x)
-        
-        x = F.relu(self.bn3(self.conv3(x)))
-        x = self.res5(x)
-        x = self.res6(x)
-        
-        x = self.gap(x)
-        x = x.view(x.size(0), -1)
+        x = self.stem(x)
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x_avg = self.gap(x).view(x.size(0), -1)
+        x_max = self.gmp(x).view(x.size(0), -1)
+        x = torch.cat([x_avg, x_max], dim=1)
         x = self.fc(x)
-        
         return x

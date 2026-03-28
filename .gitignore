@@ -31,7 +31,6 @@ ENV/
 *.aux
 *.pkl
 *.pdf
-results/
 /data/radioml2016
 
 # Jupyter Notebook

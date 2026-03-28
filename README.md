@@ -133,10 +133,25 @@ Input I/Q Signal → SNR Estimator → Gating Network → {Expert_Low, Expert_Mi
 ## Results
 
 Expected performance:
-- **Low SNR (-10 to 0 dB)**: ~60-80% accuracy
-- **Mid SNR (0 to 10 dB)**: ~80-95% accuracy
-- **High SNR (10 to 20 dB)**: ~95-99% accuracy
-- **Overall**: 5-10% improvement over baseline single-model approach
+- **Low SNR (-20 to 0 dB)**: ~35-45% accuracy (Extremely challenging; random chance is ~9%)
+- **Mid SNR (0 to 10 dB)**: ~75-90% accuracy
+- **High SNR (10 to 18 dB)**: ~92-99% accuracy
+- **Average Performance**: Significant improvement over single-model baselines due to expert specialization.
+
+## 🧠 Technical Deep Dive for Defense
+
+### 1. Mixture of Experts (MoE) Architecture
+Unlike traditional AMC which uses a single "one-size-fits-all" model, our system partitions the feature space by SNR.
+*   **SNR Estimator**: A dedicated CNN that predicts the noise regime.
+*   **Specialized Experts**: Each expert (Expert_Low, Expert_Mid, Expert_High) is trained exclusively on signals within its SNR regime. This allows the Low-SNR expert to learn subtle statistical patterns robust to noise, while the High-SNR expert focuses on precise constellation geometry.
+*   **Soft Gating**: The routing network produces weights ($w_1, w_2, w_3$) that dynamically fuse expert outputs, ensuring a smooth transition across SNR boundaries.
+
+### 2. Advanced Training Techniques
+*   **Mixup Augmentation**: We use linear interpolation of training samples to improve the model's decision boundaries and robustness.
+*   **Auxiliary Losses**:
+    *   *Load-Balance Loss*: Prevents "expert collapse" where the gating network only picks one expert.
+    *   *Diversity Loss*: Encourages experts to learn different feature representations.
+*   **Squeeze-and-Excitation (SE) Units**: Integrated into residual blocks to provide channel-wise attention, focusing the model on the most informative temporal features.
 
 ### Dataset Configuration
 
@@ -184,4 +199,4 @@ MIT License
 
 ## Acknowledgments
 
-This project was developed as part of the undergraduate final year project at Pulchowk Campus, IOE, Tribhuvan University.
+This project was developed as part of the undergraduate 3rd year project at Pulchowk Campus, IOE, Tribhuvan University.

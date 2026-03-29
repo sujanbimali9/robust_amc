@@ -118,11 +118,14 @@ async def read_root(request: Request):
     if results_dir.exists():
         performance_plots = [f.name for f in results_dir.glob("*.png")]
         
-    return templates.TemplateResponse("index.html", {
-        "request": request, 
-        "modulations": config.MODULATIONS,
-        "performance_plots": performance_plots
-    })
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={
+            "modulations": config.MODULATIONS,
+            "performance_plots": performance_plots
+        }
+    )
 
 @app.post("/predict", response_model=PredictionResponse)
 async def predict_modulation(request: PredictionRequest):

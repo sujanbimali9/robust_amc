@@ -35,6 +35,8 @@ with open(os.path.join(STATIC_DIR, '.gitkeep'), 'w') as f:
 
 # Mount static files
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+templates = Jinja2Templates(directory="templates")
+
 # Mount results directory to visualize training performance
 RESULTS_DIR = os.path.join(Config.BASE_DIR, 'results')
 if os.path.exists(RESULTS_DIR):
